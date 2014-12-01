@@ -1,6 +1,6 @@
-(defproject hostelrocket/aspis "0.2"
+(defproject hostelrocket/aspis "0.3-SNAPSHOT"
   :description "ClojureScript framework for React.js webapps"
-  :url "https://github.com/brendanyounger/aspis"
+  :url "https://github.com/HostelRocket/aspis"
   :license
   { :name "Eclipse Public License"
     :url "http://www.eclipse.org/legal/epl-v10.html" }

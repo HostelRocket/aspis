@@ -62,7 +62,7 @@
                         ~(get spec "render"))))
         hooks (merge
                 methods
-                {"mixins" '(cljs.core/array aspis.core/hoplon-mixin)
+                {"mixins" '(cljs.core/array aspis.core/aspis-mixin)
                  "displayName" (str (ns-name *ns*) "." class-name)})
         class-def
         `(let [cls# (.createClass js/React

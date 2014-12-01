@@ -35,7 +35,7 @@
 (defn- atom? [value]
   (and value (satisfies? cljs.core/IWatchable value)))
 
-(def hoplon-mixin
+(def aspis-mixin
   (js-obj
     "componentDidMount"
     (fn []
