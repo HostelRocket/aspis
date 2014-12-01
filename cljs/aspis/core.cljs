@@ -33,7 +33,7 @@
     (.forceUpdate component)))
 
 (defn- atom? [value]
-  (exists? (aget value "cljs$core$IWatchable$_add_watch$arity$3")))
+  (and value (satisfies? cljs.core/IWatchable value)))
 
 (def hoplon-mixin
   (js-obj

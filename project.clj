@@ -1,10 +1,11 @@
-(defproject aspis "0.1"
+(defproject hostelrocket/aspis "0.2"
   :description "ClojureScript framework for React.js webapps"
   :url "https://github.com/brendanyounger/aspis"
   :license
   { :name "Eclipse Public License"
     :url "http://www.eclipse.org/legal/epl-v10.html" }
 
+  :dependencies [[org.clojure/clojure "1.6.0"]]
   :source-paths ["cljs"]
 
   :profiles
