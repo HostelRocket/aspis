@@ -26,6 +26,16 @@
         form))
     form))
 
+(defmacro defmixin [mixin-name & forms]
+  (let [methods
+        (->>
+          forms
+          (partition 2)
+          (map (fn [[k v]] [(name k) (insert-this &env v)])))]
+  `(def ~(vary-meta mixin-name assoc :export true)
+    (cljs.core/js-obj
+      ~@(apply concat methods)))))
+
 (defmacro defelem [class-name & forms]
   (let [references (atom #{})
         spec
@@ -62,7 +72,7 @@
                         ~(get spec "render"))))
         hooks (merge
                 methods
-                {"mixins" '(cljs.core/array aspis.core/aspis-mixin)
+                {"mixins" `(cljs.core/array aspis.core/aspis-mixin ~@(get methods "mixins"))
                  "displayName" (str (ns-name *ns*) "." class-name)})
         class-def
         `(let [cls# (.createClass js/React
