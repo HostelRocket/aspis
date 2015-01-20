@@ -1,5 +1,6 @@
 (ns aspis.core
   (:require
+    [clojure.string :as string]
     [clojure.walk   :as walk]
     [cljs.analyzer  :as a]))
 
@@ -37,7 +38,9 @@
       ~@(apply concat methods)))))
 
 (defmacro defelem [class-name & forms]
-  (let [references (atom #{})
+  (let [global-refs (atom #{})
+        prop-refs   (atom #{})
+        state-refs  (atom #{})
         spec
         (->>
           (if (keyword? (first forms))
@@ -57,9 +60,13 @@
                        (= (symbol "deref") (first x))))
                   (do
                     (if (and (symbol? (second x)) (= "this" (namespace (second x))))
-                      (when (.startsWith (name (second x)) "props.")
-                        (swap! references conj (subs (name (second x)) 6)))
-                      (swap! references conj (second x)))
+                      (let [[k1 k2] (string/split (name (second x)) #"\.")]
+                        (cond
+                          (= "props" k1)
+                            (swap! prop-refs conj k2)
+                          (= "state" k1)
+                            (swap! state-refs conj k2)))
+                      (swap! global-refs conj (second x)))
                     x)
                 (and (symbol? x) (= "this" (namespace x)))
                   `(aget ~(symbol "this")
@@ -72,33 +79,43 @@
                         ~(get spec "render"))))
         hooks (merge
                 methods
-                {"mixins" `(cljs.core/array aspis.core/aspis-mixin ~@(get methods "mixins"))
-                 "displayName" (str (ns-name *ns*) "." class-name)})
+                { "mixins" `(cljs.core/array aspis.core/aspis-mixin ~@(get methods "mixins"))
+                  "displayName" (str (ns-name *ns*) "." class-name) }
+                (when (not-empty @global-refs)
+                  { "global-refs" (vec @global-refs) })
+                (when (not-empty @prop-refs)
+                  { "props-refs" (vec @prop-refs) })
+                (when (not-empty @state-refs)
+                  { "state-refs" (vec @state-refs) }))
         class-def
         `(let [cls# (.createClass js/React
                       (cljs.core/js-obj
                         ~@(apply concat hooks)))]
            (def ~(vary-meta class-name assoc :export true)
              (fn [& args#]
-               (let [argmap#  (aspis.core/parse-arglist args#)
-                     props#   (cljs.core/reduce-kv
-                                (fn [o# k# v#]
-                                  (cljs.core/aset o# (cljs.core/name k#) v#) o#) (cljs.core/js-obj)
-                                argmap#)]
-                 (aset props# "cljs-refs" ~(vec @references))
-                 (.createElement js/React cls# props#)))))]
+                (.createElement js/React cls# (aspis.core/args-to-props args#)))))]
     class-def))
 
-(defmacro with-init! [& body]
-  `(.push aspis.core/*initfns* (fn [] ~@body)))
+(defmacro defqueue [queue-name & body]
+  `(def ~queue-name
+     (let [queue# (cljs.core/array)]
+       (aset queue# "init!" (fn [] ~@body))
+       queue#)))
+
+(defmacro enqueue [queue & body]
+  `(do
+     (when-let [init!# (aget ~queue "init!")]
+       (aset ~queue "init!" nil)
+       (init!#))
+     (.push ~queue (fn [] ~@body))))
 
 (def ^:private passthru-queue
   '(js* "{ push: function() { for(var i = 0; i < arguments.length; i++) { if(typeof arguments[i] === 'function') { arguments[i](); } } } }"))
 
-(defmacro open-queue! [queue]
+(defmacro open! [queue]
   `(let [old-queue# ~queue]
-    (set! ~queue ~passthru-queue)
-    (.apply (aget ~queue "push") ~queue old-queue#)))
+     (set! ~queue ~passthru-queue)
+     (.apply (aget ~queue "push") ~queue old-queue#)))
 
 (defmacro set-state! [this & kvs]
   `(.setState ~this
@@ -112,52 +129,40 @@
     (map? form)    `(cljs.core/js-obj ~@(mapcat (fn [[k v]] [(name k) v]) form))
     :else          `(cljs.core/clj->js ~form)))
 
-(defn- args-to-proplist [args]
+(defn- args-to-props [args]
   (let [first-keyword?  (comp keyword? first)
         pairs           (partition-all 2 args)
         props           (->> pairs (take-while first-keyword?) (map vec) (into {}))
         children        (->> pairs (drop-while first-keyword?) (mapcat identity))
         props           (if (not-empty children)
-                          (assoc props :children
-                            (if (= 1 (count children))
-                              (first children)
-                              (vec children)))
-                          props)]
-    (mapcat
-      (fn [[k v]]
-        (condp = k
-          :css    ["style" (to-js v)]
-          :html   ["dangerouslySetInnerHTML" `(cljs.core/js-obj "__html" (str ~v))]
-          :class  ["className"
-                   (if (map? v)
-                     `(.classSet js/React.addons ~(to-js v))
-                     (to-js v))]
-          :children ["children"
-                     (cond
-                       (string? v)
-                         v
-                       (and (seq? v) (= 'aspis.core/to-react-children (first v)))
-                         v
-                       (and (seq? v)
-                            (symbol? (first v))
-                            (= "aspis.core" (namespace (first v)))
-                            (contains? react-dom-syms (symbol (name (first v)))))
-                         v
-                      :else
-                       `(aspis.core/to-react-children ~v))]
-          [(name k) v]))
-      props)))
+                          (assoc props :children `(cljs.core/array ~@children))
+                          props)
+        react-props
+        (reduce-kv
+          (fn [p k v]
+            (condp = k
+              :html (assoc p "dangerouslySetInnerHTML" `(cljs.core/js-obj "__html" (str ~v)))
+              :class (assoc p "className" `(if-let [v# ~(to-js v)] (.classSet js/React.addons v#)))
+              :css (assoc p "style" (to-js v))
+              :style (assoc p "style" (to-js v))
+              :styles (assoc p "style" `(aspis.core/styles-to-style ~v))
+              :classes (assoc p "className" `(aspis.core/classes-to-className ~v))
+              :children (assoc p "children" `(aspis.core/to-react-children ~v))
+              (assoc p (name k) v)))
+          {}
+          (dissoc props :merge))]
+    (if (contains? props :merge)
+      `(aspis.core/extend-props ~react-props ~(:merge props))
+      `(cljs.core/js-obj ~@(mapcat identity react-props)))))
 
 (defn element [tag-name args]
   (cond
-    (nil? args)
+    (empty? args)
       `(.createElement js/React ~tag-name nil)
     (keyword? (first args))
-      `(.createElement js/React ~tag-name (cljs.core/js-obj ~@(args-to-proplist args)))
-    (or (string? (first args)) (number? (first args)))
-      `(.createElement js/React ~tag-name nil ~@args)
+      `(.createElement js/React ~tag-name ~(args-to-props args))
     :else
-      `(aspis.core/tag ~tag-name ~(vec args))))
+      `(.createElement js/React ~tag-name nil ~@args)))
 
 (defmacro CSSTransitionGroup [& args] (element 'js/React.addons.CSSTransitionGroup args))
 (defmacro TransitionGroup [& args] (element 'js/React.addons.TransitionGroup args))
