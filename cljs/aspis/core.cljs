@@ -98,15 +98,11 @@
     (reduce-kv
       (fn [p k v]
         (condp = k
-          :merge    (goog.object.extend p (clj->js v))
-          :html     (aset p "dangerouslySetInnerHTML" (js-obj "__html" (str v)))
-          :css      (aset p "style" (clj->js v))
-          :style    (aset p "style" (clj->js v))
-          :styles   (aset p "style" (styles-to-style v))
-          :class    (aset p "className" (.classSet js/React.addons (clj->js v)))
-          :classes  (aset p "className" (classes-to-className v))
+          :css      (aset p "styles" [v])
+          :style    (aset p "styles" [v])
+          :class    (aset p "classes" [v])
           :children (aset p "children" (to-react-children v))
           (aset p (name k) v))
         p)
-      (js-obj)
-      props)))
+      (or (:merge props) (js-obj))
+      (dissoc props :merge))))

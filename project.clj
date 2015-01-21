@@ -1,4 +1,4 @@
-(defproject hostelrocket/aspis "0.4"
+(defproject hostelrocket/aspis "0.4.1"
   :description "ClojureScript framework for React.js webapps"
   :url "https://github.com/HostelRocket/aspis"
   :license

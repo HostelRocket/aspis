@@ -152,7 +152,7 @@
           {}
           (dissoc props :merge))]
     (if (contains? props :merge)
-      `(aspis.core/extend-props ~react-props ~(:merge props))
+      `(aspis.core/extend-props ~(:merge props) ~react-props)
       `(cljs.core/js-obj ~@(mapcat identity react-props)))))
 
 (defn element [tag-name args]
