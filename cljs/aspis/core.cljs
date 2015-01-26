@@ -18,6 +18,7 @@
 
 (defn extend-props [props extra-props]
   (let [js-props (js-obj)]
+    (print props extra-props)
     (goog.object.extend js-props (clj->js props) (clj->js extra-props))
     js-props))
 
@@ -86,6 +87,14 @@
         (if-let [first-style (first remaining-styles)]
           (goog.object.extend style (clj->js first-style)))
         (recur style (rest remaining-styles))))))
+
+(defmulti set-property! (fn [props pname pvalue] pname))
+(defmethod set-property! :default [p key value] (aset p (name key) value))
+(defmethod set-property! :css [p _ value] (aset p "styles" [value]))
+(defmethod set-property! :style [p _ value] (aset p "styles" [value]))
+(defmethod set-property! :class [p _ value] (aset p "classes" [value]))
+(defmethod set-property! :className [p _ value] (aset p "classes" [value]))
+(defmethod set-property! :children [p _ value] (aset p "children" (to-react-children v)))
 
 (defn- args-to-props [args]
   (let [first-keyword?  (comp keyword? first)

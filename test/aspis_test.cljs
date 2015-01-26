@@ -4,32 +4,27 @@
 
 (def seconds (atom 0))
 
-(a/defelem ticker
-  :getInitialState
-  (fn [] #js {:half-seconds (atom 0)})
+(a/defelem ticker {:keys [children] :as props}
+  :initialState [half-seconds 0]
   :componentWillMount
   (fn []
-    (.setInterval js/window #(swap! this/state.half-seconds inc) 500))
+    (.setInterval js/window #(swap! half-seconds inc) 500))
   :render
   (div
-    (p :children ["Half seconds elapsed: " (span @this/state.half-seconds)])
-    (p :merge this/props :children this/props.children)))
+    (p :children ["Half seconds elapsed: " (span @half-seconds)])
+    (p :merge props :children children)))
 
-(a/defelem banner
+(a/defelem banner {sec :seconds :keys [message] :or {message "Nothing passed in"}}
   (div
     (h1 :classes
-        [
-          (if (odd? @seconds) "red") ;; conditional classes
-          "underline" ;; unconditional classes
-        ]
+        [(if (odd? @sec) "red")
+         "underline"]
         :styles
-        [
-          (if (even? @seconds) {:color "green"}) ;; conditional styles
-          {:backgroundColor "yellow"} ;; unconditional styles as CLJS map
-          #js {:border "1px dotted #aaa"} ;; styles as JS object
-        ]
-      (or this/props.message "Hello, world!"))
+        [(if (even? @sec) {:color "green"})
+         {:backgroundColor "yellow"}
+         #js {:border "1px dotted #aaa"}]
+      message)
     (ticker :class "underline" "Am I underlined" "?")))
 
 (.setInterval js/window #(swap! seconds inc) 1000)
-(.render js/React (banner :message "¡Buenos dias, mundo!") (.getElementById js/document "content"))
+(.render js/React (banner :seconds seconds) (.getElementById js/document "content"))

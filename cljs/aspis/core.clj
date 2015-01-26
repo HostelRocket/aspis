@@ -13,7 +13,7 @@
              'svg-mask 'svg-var 'svg-text
              'CSSTransitionGroup 'TransitionGroup)))
 
-(defn- insert-this [env form]
+(defn- insert-this [env form bindings]
   (if (seq? form)
     (let [expanded (a/macroexpand-1 env form)]
       (if (and (sequential? expanded)
@@ -22,10 +22,41 @@
               fname   (when (symbol? (first arities)) [(first arities)])
               arities (if fname (rest arities) arities)
               arities (if (vector? (first arities)) [arities] arities)
-              arities (map (fn [[bind & body]] (list bind `(cljs.core/this-as ~(symbol "this") ~@body))) arities)]
+              arities (map (fn [[bind & body]] (list bind `(cljs.core/this-as ~(symbol "this") (let [~@bindings] ~@body)))) arities)]
           (cons 'fn* (concat fname arities)))
         form))
     form))
+
+(defn props-bindings [props]
+  (concat
+    (when (contains? props :as)
+      [(symbol (name (:as props))) `(cljs.core/js->clj (cljs.core/aget ~(symbol "this") "props") :keywordize-keys true)])
+    (mapcat
+      (fn [[k v]]
+        [k `(cljs.core/aget ~(symbol "this") "props" ~(name v))])
+      (reduce
+        #(assoc %1 (symbol (name %2)) (keyword (name %2)))
+        (dissoc props :keys :strs :syms :or :as)
+        (concat (:keys props) (:strs props) (:syms props))))))
+
+(defn default-props [props]
+  `(fn []
+     (cljs.core/js-obj
+       ~@(mapcat (fn [[k v]] [(name k) v]) (:or props)))))
+
+(defn state-bindings [initial-state]
+  (mapcat
+    (fn [k]
+      [(symbol (name k)) `(cljs.core/aget ~(symbol "this") "state" ~(name k))])
+    (take-nth 2 initial-state)))
+
+(defn get-initial-state [props initial-state]
+  (let [state (partition 2 initial-state)
+        state-atoms (mapcat (fn [[k v]] [(name k) `(clojure.core/atom ~v)]) state)]
+    `(fn []
+      (cljs.core/this-as ~(symbol "this")
+        (let [~@(props-bindings props)]
+          (cljs.core/js-obj ~@state-atoms))))))
 
 (defmacro defmixin [mixin-name & forms]
   (let [methods
@@ -41,42 +72,73 @@
   (let [global-refs (atom #{})
         prop-refs   (atom #{})
         state-refs  (atom #{})
+        [props forms]
+        (if (map? (first forms))
+          [(first forms) (rest forms)]
+          [nil forms])
         spec
         (->>
           (if (keyword? (first forms))
             forms
             (cons :render forms))
           (partition 2)
-          (map (fn [[k v]] [(name k) (insert-this &env v)]))
-          (into {})
-          (walk/prewalk
-            (fn [x]
-              (cond
-                (contains? react-dom-syms x)
-                  (symbol "aspis.core" (name x))
-                (and (list? x)
-                     (or
-                       (= (symbol "clojure.core" "deref") (first x))
-                       (= (symbol "deref") (first x))))
-                  (do
-                    (if (and (symbol? (second x)) (= "this" (namespace (second x))))
-                      (let [[k1 k2] (string/split (name (second x)) #"\.")]
-                        (cond
-                          (= "props" k1)
-                            (swap! prop-refs conj k2)
-                          (= "state" k1)
-                            (swap! state-refs conj k2)))
-                      (swap! global-refs conj (second x)))
-                    x)
-                (and (symbol? x) (= "this" (namespace x)))
-                  `(aget ~(symbol "this")
-                     ~@(clojure.string/split (name x) #"\."))
-                :else x))))
-        methods (assoc spec
-                  "render"
-                  `(fn []
-                     (cljs.core/this-as ~(symbol "this")
-                        ~(get spec "render"))))
+          (map (fn [[k v]] [(name k) v]))
+          (into {}))
+        state (get spec "initialState")
+        spec (reduce-kv (fn [m k v] (assoc m k (insert-this &env v (state-bindings state)))) {} spec)
+        props-names (into {} (map vec (partition 2 (props-bindings props))))
+        state-names (into {} (map vec (partition 2 (state-bindings state))))
+        spec
+        (walk/prewalk
+          (fn [x]
+            (cond
+              (and
+                (list? x)
+                (contains? react-dom-syms (first x)))
+                  (cons (symbol "aspis.core" (name (first x))) (rest x))
+              (and (list? x)
+                   (or
+                     (= (symbol "clojure.core" "deref") (first x))
+                     (= (symbol "deref") (first x))))
+                (cond
+                  (and (symbol? (second x)) (= "this" (namespace (second x))))
+                    (let [[k1 k2] (string/split (name (second x)) #"\.")]
+                      (cond
+                        (= "props" k1)
+                          (swap! prop-refs conj k2)
+                        (= "state" k1)
+                          (swap! state-refs conj k2))
+                      x)
+                  (and (symbol? (second x)) (contains? props-names (second x)))
+                    (do
+                      (swap! prop-refs conj (nth (get props-names (second x)) 3))
+                      `(clojure.core/deref ~(symbol (name (second x)))))
+                  (and (symbol? (second x)) (contains? state-names (second x)))
+                    (do
+                      (swap! state-refs conj (name (second x)))
+                      `(clojure.core/deref ~(symbol (name (second x)))))
+                  :else
+                    (do
+                      (swap! global-refs conj (second x))
+                      x))
+              (and (symbol? x) (= "this" (namespace x)))
+                `(cljs.core/aget ~(symbol "this")
+                  ~@(clojure.string/split (name x) #"\."))
+              :else x))
+          spec)
+        methods
+        (merge
+          (dissoc spec "initialState")
+          (when state
+            { "getInitialState" (get-initial-state props state) })
+          (when (contains? props :or)
+            { "getDefaultProps" (default-props props) })
+          { "render"
+            `(fn []
+              (cljs.core/this-as ~(symbol "this")
+                (let [~@(props-bindings props)
+                      ~@(state-bindings state)]
+                  ~(get spec "render")))) })
         hooks (merge
                 methods
                 { "mixins" `(cljs.core/array aspis.core/aspis-mixin ~@(get methods "mixins"))
@@ -153,7 +215,8 @@
           (dissoc props :merge))]
     (if (contains? props :merge)
       `(aspis.core/extend-props ~(:merge props) ~react-props)
-      `(cljs.core/js-obj ~@(mapcat identity react-props)))))
+      `(cljs.core/js-obj ~@(mapcat identity react-props))
+      )))
 
 (defn element [tag-name args]
   (cond
