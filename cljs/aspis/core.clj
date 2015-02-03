@@ -7,6 +7,10 @@
 (def ^:private react-elements
   '[a abbr address area article aside audio b base bdi bdo big blockquote body br button canvas caption cite code col colgroup data datalist dd del details dfn div dl dt em embed fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 head header hr html i iframe img input ins kbd keygen label legend li link main mark menu menuitem meter nav noscript object ol optgroup option output p param pre progress q rp rt ruby s samp script section select small source span strong style sub summary sup table tbody td textarea tfoot th thead title tr track u ul video wbr circle defs ellipse g line linearGradient path pattern polygon polyline radialGradient rect stop svg tspan])
 
+(def ^:private react-attributes
+  (set
+    '[accept acceptCharset accessKey action allowFullScreen allowTransparency alt async autoComplete autoPlay cellPadding cellSpacing charSet checked classID className cols colSpan content contentEditable contextMenu controls coords crossOrigin data dateTime defer dir disabled download draggable encType form formAction formEncType formMethod formNoValidate formTarget frameBorder height hidden href hrefLang htmlFor httpEquiv icon id label lang list loop manifest marginHeight marginWidth max maxLength media mediaGroup method min multiple muted name noValidate open pattern placeholder poster preload radioGroup readOnly rel required role rows rowSpan sandbox scope scrolling seamless selected shape size sizes span spellCheck src srcDoc srcSet start step style tabIndex target title type useMap value width wmode autoCapitalize autoCorrect property itemProp itemScope itemType cx cy d dx dy fill fillOpacity fontFamily fontSize fx fy gradientTransform gradientUnits markerEnd markerMid markerStart offset opacity patternContentUnits patternUnits points preserveAspectRatio r rx ry spreadMethod stopColor stopOpacity stroke strokeDasharray strokeLinecap strokeOpacity strokeWidth textAnchor transform version viewBox x1 x2 x y1 y2 y]))
+
 (def ^:private react-dom-syms
   (set (conj react-elements
              'html-map 'html-meta 'html-time
@@ -30,7 +34,7 @@
 (defn props-bindings [props]
   (concat
     (when (contains? props :as)
-      [(symbol (name (:as props))) `(cljs.core/js->clj (cljs.core/aget ~(symbol "this") "props") :keywordize-keys true)])
+      [(symbol (name (:as props))) `(cljs.core/aget ~(symbol "this") "props")])
     (mapcat
       (fn [[k v]]
         [k `(cljs.core/aget ~(symbol "this") "props" ~(name v))])
@@ -72,10 +76,14 @@
   (let [global-refs (atom #{})
         prop-refs   (atom #{})
         state-refs  (atom #{})
-        [props forms]
+        [props state forms]
         (if (map? (first forms))
-          [(first forms) (rest forms)]
-          [nil forms])
+          (if (vector? (second forms))
+            [(first forms) (second forms) (drop 2 forms)]
+            [(first forms) nil (rest forms)])
+          [nil nil forms])
+        props-names (into {} (map vec (partition 2 (props-bindings props))))
+        state-names (into {} (map vec (partition 2 (state-bindings state))))
         spec
         (->>
           (if (keyword? (first forms))
@@ -83,11 +91,8 @@
             (cons :render forms))
           (partition 2)
           (map (fn [[k v]] [(name k) v]))
-          (into {}))
-        state (get spec "initialState")
-        spec (reduce-kv (fn [m k v] (assoc m k (insert-this &env v (state-bindings state)))) {} spec)
-        props-names (into {} (map vec (partition 2 (props-bindings props))))
-        state-names (into {} (map vec (partition 2 (state-bindings state))))
+          (into {})
+          (reduce-kv (fn [m k v] (assoc m k (insert-this &env v (state-bindings state)))) {}))
         spec
         (walk/prewalk
           (fn [x]
@@ -128,7 +133,7 @@
           spec)
         methods
         (merge
-          (dissoc spec "initialState")
+          spec
           (when state
             { "getInitialState" (get-initial-state props state) })
           (when (contains? props :or)
@@ -139,22 +144,23 @@
                 (let [~@(props-bindings props)
                       ~@(state-bindings state)]
                   ~(get spec "render")))) })
-        hooks (merge
-                methods
-                { "mixins" `(cljs.core/array aspis.core/aspis-mixin ~@(get methods "mixins"))
-                  "displayName" (str (ns-name *ns*) "." class-name) }
-                (when (not-empty @global-refs)
-                  { "global-refs" (vec @global-refs) })
-                (when (not-empty @prop-refs)
-                  { "props-refs" (vec @prop-refs) })
-                (when (not-empty @state-refs)
-                  { "state-refs" (vec @state-refs) }))
+        hooks
+        (merge
+          methods
+          { "mixins" `(cljs.core/array aspis.core/aspis-mixin ~@(get methods "mixins"))
+            "displayName" (str (ns-name *ns*) "." class-name) }
+          (when (not-empty @global-refs)
+            { "global-refs" (vec @global-refs) })
+          (when (not-empty @prop-refs)
+            { "props-refs" (vec @prop-refs) })
+          (when (not-empty @state-refs)
+            { "state-refs" (vec @state-refs) }))
         class-def
         `(let [cls# (.createClass js/React
                       (cljs.core/js-obj
                         ~@(apply concat hooks)))]
-           (def ~(vary-meta class-name assoc :export true)
-             (fn [& args#]
+            (def ~(vary-meta class-name assoc :export true)
+              (fn [& args#]
                 (.createElement js/React cls# (aspis.core/args-to-props args#)))))]
     class-def))
 
@@ -191,32 +197,46 @@
     (map? form)    `(cljs.core/js-obj ~@(mapcat (fn [[k v]] [(name k) v]) form))
     :else          `(cljs.core/clj->js ~form)))
 
+(defmulti set-property! (fn [props pname pvalue] pname))
+(defmethod set-property! :default [p key value] (assoc p (name key) value))
+(defmethod set-property! :html [p _ value] (assoc p "dangerouslySetInnerHTML" `(cljs.core/js-obj "__html" (str ~value))))
+(defmethod set-property! :css [p _ value] (assoc p "style" (to-js value)))
+(defmethod set-property! :style [p _ value] (assoc p "style" (to-js value)))
+(defmethod set-property! :styles [p _ value]
+  (assoc p "style"
+    (if (vector? value)
+      `(aspis.core/styles-to-style (cljs.core/array ~@value))
+      `(aspis.core/styles-to-style ~value))))
+(defmethod set-property! :class [p _ value]
+  (assoc p "className"
+    (if (string? value)
+      value
+      `(aspis.core/class-to-className ~value))))
+(defmethod set-property! :classes [p _ value]
+  (assoc p "className"
+    (if (vector? value)
+      `(.join (cljs.core/array ~@value) " ")
+      `(aspis.core/classes-to-className ~value))))
+(defmethod set-property! :children [p _ value]
+  (assoc p "children"
+    (cond
+      (and (vector? value) (= 1 (count value)))
+        (first value)
+      (vector? value)
+        `(cljs.core/array ~@value)
+      :else
+        `(aspis.core/to-react-children ~value))))
+
 (defn- args-to-props [args]
   (let [first-keyword?  (comp keyword? first)
         pairs           (partition-all 2 args)
         props           (->> pairs (take-while first-keyword?) (map vec) (into {}))
         children        (->> pairs (drop-while first-keyword?) (mapcat identity))
         props           (if (not-empty children)
-                          (assoc props :children `(cljs.core/array ~@children))
+                          (assoc props :children (vec children))
                           props)
-        react-props
-        (reduce-kv
-          (fn [p k v]
-            (condp = k
-              :html (assoc p "dangerouslySetInnerHTML" `(cljs.core/js-obj "__html" (str ~v)))
-              :class (assoc p "className" `(if-let [v# ~(to-js v)] (.classSet js/React.addons v#)))
-              :css (assoc p "style" (to-js v))
-              :style (assoc p "style" (to-js v))
-              :styles (assoc p "style" `(aspis.core/styles-to-style ~v))
-              :classes (assoc p "className" `(aspis.core/classes-to-className ~v))
-              :children (assoc p "children" `(aspis.core/to-react-children ~v))
-              (assoc p (name k) v)))
-          {}
-          (dissoc props :merge))]
-    (if (contains? props :merge)
-      `(aspis.core/extend-props ~(:merge props) ~react-props)
-      `(cljs.core/js-obj ~@(mapcat identity react-props))
-      )))
+        react-props     (reduce-kv set-property! {} props)]
+    `(cljs.core/js-obj ~@(mapcat identity react-props))))
 
 (defn element [tag-name args]
   (cond

@@ -4,17 +4,21 @@
 
 (def seconds (atom 0))
 
-(a/defelem ticker {:keys [children] :as props}
-  :initialState [half-seconds 0]
+(a/defelem ticker
+           {:keys [children] :as props}
+           [half-seconds 0]
   :componentWillMount
   (fn []
     (.setInterval js/window #(swap! half-seconds inc) 500))
   :render
   (div
     (p :children ["Half seconds elapsed: " (span @half-seconds)])
-    (p :merge props :children children)))
+    (a/with-props (p :children children) props)))
 
-(a/defelem banner {sec :seconds :keys [message] :or {message "Nothing passed in"}}
+(a/defelem banner
+           {sec :seconds
+            :keys [message]
+            :or {message "Nothing passed in"}}
   (div
     (h1 :classes
         [(if (odd? @sec) "red")

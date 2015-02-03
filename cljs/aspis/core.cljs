@@ -16,18 +16,15 @@
   (enable-console-print!)
   (set-print-fn! js/print))
 
-(defn extend-props [props extra-props]
-  (let [js-props (js-obj)]
-    (print props extra-props)
-    (goog.object.extend js-props (clj->js props) (clj->js extra-props))
-    js-props))
-
 (defn- component-force-update [component reference old-value new-value]
   (when (.isMounted component)
     (.forceUpdate component)))
 
 (defn atom? [value]
   (and value (satisfies? cljs.core/IWatchable value)))
+
+(defn with-props [element props]
+  (.cloneWithProps js/React.addons element (clj->js props)))
 
 (defn- guarded-add-watch [watchable k f]
   (when (atom? watchable)
@@ -68,15 +65,25 @@
 
 (defn- to-react-children [children]
   (if (or (seq? children) (sequential? children))
-    (to-array (seq children))
+    (let [child-array (to-array (seq children))]
+      (if (= 1 (.-length child-array))
+        (aget child-array 0)
+        child-array))
     children))
 
+(defn- class-to-className [klass]
+  (cond
+    (nil? klass)
+      ""
+    (string? klass)
+      klass
+    (map? klass)
+      (.classSet js/React.addons (clj->js klass))
+    :else
+      (.classSet js/React.addons klass)))
+
 (defn- classes-to-className [classes]
-  (loop [className ""
-         remaining-classes (seq classes)]
-    (if (empty? remaining-classes)
-      className
-      (recur (str className " " (first remaining-classes)) (rest remaining-classes)))))
+  (.join (to-array classes) " "))
 
 (defn- styles-to-style [styles]
   (loop [style (js-obj)
@@ -90,28 +97,24 @@
 
 (defmulti set-property! (fn [props pname pvalue] pname))
 (defmethod set-property! :default [p key value] (aset p (name key) value))
-(defmethod set-property! :css [p _ value] (aset p "styles" [value]))
-(defmethod set-property! :style [p _ value] (aset p "styles" [value]))
-(defmethod set-property! :class [p _ value] (aset p "classes" [value]))
-(defmethod set-property! :className [p _ value] (aset p "classes" [value]))
-(defmethod set-property! :children [p _ value] (aset p "children" (to-react-children v)))
+(defmethod set-property! :css [p _ value] (aset p "style" (clj->js value)))
+(defmethod set-property! :style [p _ value] (aset p "style" (clj->js value)))
+(defmethod set-property! :styles [p _ value] (aset p "style" (styles-to-style value)))
+(defmethod set-property! :class [p _ value] (aset p "className" (class-to-className value)))
+(defmethod set-property! :classes [p _ value] (aset p "className" (classes-to-className value)))
+(defmethod set-property! :children [p _ value] (aset p "children" (to-react-children value)))
 
-(defn- args-to-props [args]
-  (let [first-keyword?  (comp keyword? first)
-        pairs           (partition-all 2 args)
-        props           (->> pairs (take-while first-keyword?) (map vec) (into {}))
-        children        (->> pairs (drop-while first-keyword?) (mapcat identity))
-        props           (if (not-empty children)
-                          (assoc props :children children)
-                          props)]
-    (reduce-kv
-      (fn [p k v]
-        (condp = k
-          :css      (aset p "styles" [v])
-          :style    (aset p "styles" [v])
-          :class    (aset p "classes" [v])
-          :children (aset p "children" (to-react-children v))
-          (aset p (name k) v))
-        p)
-      (or (:merge props) (js-obj))
-      (dissoc props :merge))))
+(defn- args-to-props [orig-args]
+  (let [props (js-obj)]
+    (loop [args orig-args]
+      (let [k (first args)]
+        (cond
+          (nil? k)
+            nil
+          (keyword? k)
+            (do
+              (set-property! props k (second args))
+              (recur (next (next args))))
+          :else
+            (aset props "children" (to-array args)))))
+    props))
