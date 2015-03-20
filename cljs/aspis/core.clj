@@ -67,7 +67,7 @@
         (->>
           forms
           (partition 2)
-          (map (fn [[k v]] [(name k) (insert-this &env v)])))]
+          (map (fn [[k v]] [(name k) (insert-this &env v [])])))]
   `(def ~(vary-meta mixin-name assoc :export true)
     (cljs.core/js-obj
       ~@(apply concat methods)))))

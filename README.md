@@ -43,3 +43,23 @@ Additional properties may be added onto an element via `aspis.core/with-props`.
 ```clojure
 (aspis.core/with-props (a/div "Hello") {:color "red"})
 ```
+
+## Atoms
+
+To better support ClojureScript's idioms for state management, Aspis will automatically re-render any component when an atom its `:render` method depends on changes.  It does this by scanning the `:render` method for calls to `deref` (a.k.a `@`) and adding watches to those atoms on mount.
+
+For instance,
+
+```(def counter (atom 0))
+
+(aspis.core/defelem my-component
+    (button :onClick 
+            (fn [event]
+                (.preventDefault event)
+                (swap! counter inc))
+            (str "You have clicked " @counter " times")))
+```
+
+will re-render every time the `counter` atom changes value.  In this case, the atom is changed from within the component, but that is not essential.  External changes to `counter` will still cause `my-component` to re-render (via `.forceUpdate`).
+
+Atoms in `props` or `state` which are `deref`'d in render will also trigger updates.

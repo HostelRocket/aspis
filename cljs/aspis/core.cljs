@@ -102,7 +102,6 @@
 (defmethod set-property! :styles [p _ value] (aset p "style" (styles-to-style value)))
 (defmethod set-property! :class [p _ value] (aset p "className" (class-to-className value)))
 (defmethod set-property! :classes [p _ value] (aset p "className" (classes-to-className value)))
-(defmethod set-property! :children [p _ value] (aset p "children" (to-react-children value)))
 
 (defn- args-to-props [orig-args]
   (let [props (js-obj)]
