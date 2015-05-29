@@ -13,6 +13,7 @@
   :render
   (div
     (p :children ["Half seconds elapsed: " (span @half-seconds)])
+    (div :styles [{:color "red"} this/props.style] "Should not be red")
     (a/with-props (p :children children) props)))
 
 (a/defelem banner
@@ -28,7 +29,7 @@
          {:backgroundColor "yellow"}
          #js {:border "1px dotted #aaa"}]
       message)
-    (ticker :class "underline" "Am I underlined" "?")))
+    (ticker :class "underline" :css {:color "blue"} "Am I underlined" "?")))
 
 (.setInterval js/window #(swap! seconds inc) 1000)
 (.render js/React (banner :seconds seconds) (.getElementById js/document "content"))

@@ -14,7 +14,8 @@ For example:
 (a-component :style {:color "red" :backgroundColor "green"})
 (a-component :css {:color "red" :backgroundColor "green"})
 ```
-in all three cases, the style information can be retrieved as `this/props.style` in the render method of `a-component`.
+
+in all three cases, the style information can be retrieved as a JavaScript object from `this/props.style` in the render method of `a-component`.
 
 The same is true of the class:
 ```clojure
@@ -22,6 +23,7 @@ The same is true of the class:
 (a-component :class "a b")
 (a-component :className "a b")
 ```
+
 in all three cases, the class can be retrieved from `this/props.className` in ther render method of `a-component`.
 
 ## Destructuring props
@@ -31,7 +33,7 @@ You can bind property names locally by providing a map destructuring form to `de
 Furthermore, these bindings will be available in any other functions present in the `defelem` besides the render function.
 
 ```clojure
-(aspis.core/defelem my-component 
+(aspis.core/defelem my-component
                     {:keys [message] :or {message "Nothing to say"}}
     (h1 message))
 ```
@@ -41,7 +43,7 @@ Furthermore, these bindings will be available in any other functions present in 
 Additional properties may be added onto an element via `aspis.core/with-props`.
 
 ```clojure
-(aspis.core/with-props (a/div "Hello") {:color "red"})
+(aspis.core/with-props (aspis.core/div "Hello") {:style {:color "red"}})
 ```
 
 ## Atoms
@@ -50,12 +52,13 @@ To better support ClojureScript's idioms for state management, Aspis will automa
 
 For instance,
 
-```(def counter (atom 0))
+```clojure
+(def counter (atom 0))
 
 (aspis.core/defelem my-component
-    (button :onClick 
+    (button :type "button"
+            :onClick
             (fn [event]
-                (.preventDefault event)
                 (swap! counter inc))
             (str "You have clicked " @counter " times")))
 ```
